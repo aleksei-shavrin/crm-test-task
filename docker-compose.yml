@@ -1,0 +1,85 @@
+services:
+  app:
+    image: node:18-alpine
+    container_name: vue-app
+    working_dir: /app
+    volumes:
+      - ./app:/app
+      - /app/node_modules
+    ports:
+      - "0.0.0.0:8080:8080"
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - NODE_ENV=development
+      - HOST=0.0.0.0
+      - PORT=8080
+      - API_PROXY_TARGET=http://api:3000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+  api:
+    image: node:20-alpine
+    container_name: api
+    working_dir: /api
+    volumes:
+      - ./api:/api
+      - /api/node_modules
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - NODE_ENV=development
+      - HOST=0.0.0.0
+      - PORT=3000
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - MANAGER_EMAIL=${MANAGER_EMAIL}
+      - MANAGER_PASSWORD=${MANAGER_PASSWORD}
+      - MONGODB_URI=mongodb://${MONGO_APP_USER}:${MONGO_APP_PASSWORD}@mongodb:27017/${MONGO_DATABASE}?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+    depends_on:
+      - mongodb
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:6379:6379"
+
+  mongodb:
+    image: mongo:7
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:27017:27017"
+    volumes:
+      - ./storage/mongodb:/data/db
+      - ./mongodb/init/init-mongo.sh:/docker-entrypoint-initdb.d/init-mongo.sh:ro
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
+      - MONGO_INITDB_DATABASE=${MONGO_DATABASE}
+      - MONGO_INITDB_USERNAME=${MONGO_APP_USER}
+      - MONGO_INITDB_PASSWORD=${MONGO_APP_PASSWORD}
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      api:
+        condition: service_started
+      app:
+        condition: service_healthy
+
